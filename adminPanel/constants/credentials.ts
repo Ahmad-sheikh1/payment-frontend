@@ -34,6 +34,16 @@ export const MERCHANT_CREDENTIALS: MerchantAccount[] = [
     address: 'Liberty Market, Lahore',
   },
   {
+    id: 'signup_test',
+    email: 'signup-test@haiderpay.com',
+    password: 'test123',
+    type: 'shop',
+    businessName: 'Offline Test Shop',
+    ownerName: 'Signup Tester',
+    phone: '0300-1112233',
+    address: 'Vercel Web Test Road, Lahore',
+  },
+  {
     id: 'rest_1',
     email: 'restaurant@haiderpay.com',
     password: 'rest123',

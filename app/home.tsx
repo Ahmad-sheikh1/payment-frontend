@@ -12,17 +12,16 @@ import {
   Image,
   StatusBar,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 import { getMerchantSession } from '../adminPanel/auth/session';
+import { API_URL } from '../apiConfig';
 
 const { width } = Dimensions.get('window');
 
-// Navigate to Signup screen when user taps the banner button
-const handleSignup = () => {
-  router.push('/signup');
-};
 const COLUMN_WIDTH = (width - 36) / 2;
 
 // ── DUMMY DATA ──────────────────────────────────────────────────────────────
@@ -289,6 +288,25 @@ export default function HomeScreen() {
   const router = useRouter();
   const merchant = getMerchantSession();
 
+  const handleDownloadApp = async () => {
+    const apkUrl = `${API_URL}/public/haiderpay.apk`;
+    try {
+      const supported = await Linking.canOpenURL(apkUrl);
+      if (supported) {
+        await Linking.openURL(apkUrl);
+      } else {
+        Alert.alert('Error', 'Cannot download app from this device. Please visit: ' + apkUrl);
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert(
+        'Downloading App',
+        'Downloading HaiderPay.apk... Please check your downloads folder to install it once complete.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   useEffect(() => {
     if (merchant) {
       if (merchant.type === 'shop') {
@@ -305,6 +323,21 @@ export default function HomeScreen() {
 
   const handleSignup = () => {
     router.push('/signup');
+  };
+
+  const [isWebBannerHovered, setIsWebBannerHovered] = useState(false);
+
+  const handleWebDownload = () => {
+    const apkUrl = `${API_URL}/downloads/app.apk`;
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') {
+        window.open(apkUrl, '_blank');
+      } else {
+        Linking.openURL(apkUrl).catch(err => console.error("Couldn't load page", err));
+      }
+    } else {
+      Linking.openURL(apkUrl).catch(err => console.error("Couldn't load page", err));
+    }
   };
 
   // ── ANIMATED SIDEBAR DRAWER STATES ──
@@ -430,14 +463,50 @@ export default function HomeScreen() {
         <TouchableOpacity style={styles.menuButton} onPress={openDrawer} activeOpacity={0.8}>
           <Text style={styles.menuButtonText}>☰</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.registerBtn}
-          onPress={() => router.push('/signup')}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.registerBtnText}>Register</Text>
-        </TouchableOpacity>
+
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.downloadBtn}
+            onPress={handleDownloadApp}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.downloadBtnText}>📲 Download App</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.registerBtn}
+            onPress={() => router.push('/signup')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.registerBtnText}>Register</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* Web Download Banner */}
+      {Platform.OS === 'web' && (
+        <View style={styles.webBanner}>
+          <View style={styles.webBannerContent}>
+            <Text style={styles.webBannerTitle}>📲 Install HaiderPay Android App</Text>
+            <Text style={styles.webBannerSub}>
+              Download the official APK to experience lightning-fast checkouts directly on your phone.
+            </Text>
+            <Text style={styles.webBannerHelperText}>
+              💡 Download ke baad apne phone ki Settings mein 'Install from Unknown Sources' allow karke install karein
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.webBannerBtn, isWebBannerHovered && styles.webBannerBtnHover]}
+            onPress={handleWebDownload}
+            activeOpacity={0.85}
+            // @ts-ignore
+            onMouseEnter={() => setIsWebBannerHovered(true)}
+            // @ts-ignore
+            onMouseLeave={() => setIsWebBannerHovered(false)}
+          >
+            <Text style={styles.webBannerBtnText}>Download Now</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* ── SEARCH BAR ── */}
       <View style={styles.searchBar}>
@@ -576,6 +645,65 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  webBanner: {
+    backgroundColor: '#1E1E24',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    marginHorizontal: 12,
+    marginTop: 12,
+    marginBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  webBannerContent: {
+    flex: 1,
+    minWidth: 260,
+    gap: 4,
+  },
+  webBannerTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  webBannerSub: {
+    fontSize: 12,
+    color: '#CCCCCC',
+    lineHeight: 16,
+  },
+  webBannerHelperText: {
+    fontSize: 10.5,
+    color: '#FFD000',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  webBannerBtn: {
+    backgroundColor: '#FFD000',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#FFD000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  webBannerBtnHover: {
+    backgroundColor: '#FFE054',
+    borderColor: '#FFE054',
+  },
+  webBannerBtnText: {
+    color: '#1E1E24',
+    fontSize: 12.5,
+    fontWeight: '800',
   },
   // Header
   header: {
@@ -1126,5 +1254,30 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontStyle: 'italic',
     color: '#FFFFFF',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  downloadBtn: {
+    backgroundColor: '#FF4010',
+    borderWidth: 1.5,
+    borderColor: '#FFD000',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  downloadBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

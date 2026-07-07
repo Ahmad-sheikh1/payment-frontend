@@ -15,6 +15,7 @@ import { API_URL } from '../apiConfig';
 import { setMerchantSession, getMerchantSession } from '../adminPanel/auth/session';
 import { MERCHANT_CREDENTIALS, DEMO_CREDENTIAL_HINTS } from '../adminPanel/constants/credentials';
 import { AdminRoutes } from '../adminPanel/constants/routes';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -31,6 +32,21 @@ export default function LoginScreen() {
   }, [merchant]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [offlineAccounts, setOfflineAccounts] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadOfflineAccounts = async () => {
+      try {
+        const raw = await AsyncStorage.getItem('@registered_merchants');
+        if (raw) {
+          setOfflineAccounts(JSON.parse(raw));
+        }
+      } catch (e) {
+        console.error('Failed to load registered offline accounts:', e);
+      }
+    };
+    loadOfflineAccounts();
+  }, []);
 
   const handleLogin = async () => {
     try {
@@ -73,8 +89,9 @@ export default function LoginScreen() {
     } catch (err: any) {
       console.error('API Login failed, trying local fallback:', err);
       
-      // Fallback: Authenticate locally using MERCHANT_CREDENTIALS
-      const localMatch = MERCHANT_CREDENTIALS.find(
+      // Fallback: Authenticate locally using MERCHANT_CREDENTIALS and offlineAccounts
+      const allLocal = [...MERCHANT_CREDENTIALS, ...offlineAccounts];
+      const localMatch = allLocal.find(
         (m) => m.email.toLowerCase() === email.trim().toLowerCase() && m.password === password
       );
 
@@ -179,6 +196,32 @@ export default function LoginScreen() {
               <Text style={styles.hintCred}>Password: {item.password}</Text>
             </TouchableOpacity>
           ))}
+
+          {offlineAccounts.length > 0 && (
+            <>
+              <Text style={[styles.hintsTitle, { marginTop: 16 }]}>Offline Registered Accounts</Text>
+              {offlineAccounts.map((item) => (
+                <TouchableOpacity
+                  key={item.id || item.email}
+                  style={[
+                    styles.hintCard,
+                    item.type === 'shop' ? styles.shopHint : styles.restHint
+                  ]}
+                  onPress={() => {
+                    setEmail(item.email);
+                    setPassword(item.password);
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.hintName}>
+                    {item.businessName} ({item.type === 'shop' ? 'Shop' : 'Restaurant'})
+                  </Text>
+                  <Text style={styles.hintCred}>{item.email}</Text>
+                  <Text style={styles.hintCred}>Password: {item.password}</Text>
+                </TouchableOpacity>
+              ))}
+            </>
+          )}
         </View>
       </ScrollView>
     </View>

@@ -12,6 +12,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.haiderpay.app",
       "adaptiveIcon": {
         "backgroundColor": "#F5F5F5",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -33,9 +34,9 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#FF4747",
+          "backgroundColor": "#FFFFFF",
           "dark": {
-            "backgroundColor": "#FF4747"
+            "backgroundColor": "#FFFFFF"
           }
         }
       ]
@@ -43,6 +44,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "4488c12d-1a03-475f-b95c-39d817ae8eed"
+      }
     }
   }
 }

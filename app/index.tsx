@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
   StatusBar,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -152,10 +153,7 @@ export default function WelcomeScreen() {
       <View style={styles.contentWrap}>
         {/* Animated Brand Logo Container */}
         <Animated.View style={[styles.logoContainer, logoStyle]}>
-          <Text style={styles.logoSymbol}>H</Text>
-          <View style={styles.logoBadge}>
-            <Text style={styles.logoBadgeText}>PAY</Text>
-          </View>
+          <Image source={require('../assets/images/icon.png')} style={styles.logoImage} />
         </Animated.View>
 
         {/* Text Area */}
@@ -230,7 +228,7 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 30,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
     borderColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
@@ -242,13 +240,10 @@ const styles = StyleSheet.create({
     shadowRadius: 15,
     elevation: 8,
   },
-  logoSymbol: {
-    fontSize: 54,
-    fontWeight: '900',
-    color: '#FF4010',
-    textShadowColor: 'rgba(255, 64, 16, 0.5)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 8,
+  logoImage: {
+    width: 110,
+    height: 110,
+    borderRadius: 30,
   },
   logoBadge: {
     position: 'absolute',

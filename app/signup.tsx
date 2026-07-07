@@ -3,7 +3,9 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Status
 import axios from 'axios';
 import { API_URL } from '../apiConfig';
 import { useRouter } from 'expo-router';
-import { getMerchantSession } from '../adminPanel/auth/session';
+import { getMerchantSession, setMerchantSession } from '../adminPanel/auth/session';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -29,33 +31,121 @@ export default function SignupScreen() {
     images: [] as string[],
   });
 
+  const [showDropdown, setShowDropdown] = useState(false);
+
   const handleSignup = async () => {
     try {
-      const res = await axios.post(`${API_URL}/api/auth/signup`, form);
+      if (!form.email || !form.password || !form.fullName || !form.businessType) {
+        Alert.alert('Error', 'Please fill all mandatory fields (Name, Email, Password, Business Type)');
+        return;
+      }
+
+      const signupData = {
+        fullName: form.fullName.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        cnic: form.cnic.trim(),
+        password: form.password,
+        role: form.businessType,
+        images: form.images
+      };
+
+      const res = await axios.post(`${API_URL}/api/auth/signup`, signupData);
       const { message, user } = res.data;
+      
       Alert.alert('Success', message);
+      
+      // Save session compatibility
+      const merchantSession = {
+        id: String(user.id),
+        email: user.email,
+        password: '',
+        type: (user.role.toLowerCase() === 'shop' ? 'shop' : 'restaurant') as 'shop' | 'restaurant',
+        businessName: user.fullName || 'My Business',
+        ownerName: user.fullName || 'Owner',
+        phone: user.phone || '',
+        address: user.address || '',
+      };
+      setMerchantSession(merchantSession);
+
       // Navigate based on role
-      if (user.role === 'Shop') {
-        router.push('/adminPanel/shop');
-      } else if (user.role === 'Restaurant') {
-        router.push('/adminPanel/restaurant');
+      if (merchantSession.type === 'shop') {
+        router.replace('/adminPanel/shop');
       } else {
-        router.push('/');
+        router.replace('/adminPanel/restaurant');
       }
     } catch (err: any) {
-      console.error(err);
-      Alert.alert('Error', err?.response?.data?.message || 'Signup failed');
+      console.error('API Signup failed, running offline fallback:', err);
+      
+      // Local Demo / Offline mode fallback
+      Alert.alert(
+        'Offline Demo Mode',
+        'Backend server offline. Setting up local merchant account...',
+        [
+          {
+            text: 'OK',
+            onPress: async () => {
+              const localUser = {
+                id: 'local_' + Date.now(),
+                email: form.email.trim().toLowerCase(),
+                password: form.password,
+                type: (form.businessType.toLowerCase() === 'shop' ? 'shop' : 'restaurant') as 'shop' | 'restaurant',
+                businessName: form.fullName || 'My Business',
+                ownerName: form.fullName || 'Owner',
+                phone: form.phone || '',
+                address: 'Local Offline Address',
+              };
+
+              try {
+                const existing = await AsyncStorage.getItem('@registered_merchants');
+                const list = existing ? JSON.parse(existing) : [];
+                list.push(localUser);
+                await AsyncStorage.setItem('@registered_merchants', JSON.stringify(list));
+                
+                setMerchantSession(localUser);
+                Alert.alert('Success', 'Registered locally in Offline Demo Mode!');
+                
+                if (localUser.type === 'shop') {
+                  router.replace('/adminPanel/shop');
+                } else {
+                  router.replace('/adminPanel/restaurant');
+                }
+              } catch (e) {
+                console.error('Failed to save offline account', e);
+                Alert.alert('Error', 'Failed to complete offline registration.');
+              }
+            }
+          }
+        ]
+      );
     }
   };
 
+  const pickImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'We need storage permission to pick images.');
+        return;
+      }
 
-  const [showDropdown, setShowDropdown] = useState(false);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
 
-  const addDummyImage = () => {
-    setForm(prev => ({
-      ...prev,
-      images: [...prev.images, `https://picsum.photos/seed/${Math.random()}/150/150`]
-    }));
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setForm(prev => ({
+          ...prev,
+          images: [...prev.images, result.assets[0].uri]
+        }));
+      }
+    } catch (error) {
+      console.error('Error picking image: ', error);
+      Alert.alert('Error', 'Failed to pick image.');
+    }
   };
 
   const removeImage = (index: number) => {
@@ -91,7 +181,7 @@ export default function SignupScreen() {
                 </TouchableOpacity>
               </View>
             ))}
-            <TouchableOpacity style={styles.imageUploadBtn} onPress={addDummyImage} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.imageUploadBtn} onPress={pickImage} activeOpacity={0.8}>
               <Text style={styles.imageUploadIcon}>📷</Text>
               <Text style={styles.imageUploadText}>Add</Text>
             </TouchableOpacity>
