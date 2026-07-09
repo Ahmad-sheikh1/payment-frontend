@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, StatusBar } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image, StatusBar, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { API_URL } from '../apiConfig';
 
 // Dummy data to simulate registered businesses
 const DUMMY_BUSINESSES = [
@@ -57,9 +60,69 @@ const DUMMY_BUSINESSES = [
 export default function BusinessesScreen() {
   const router = useRouter();
   const [filter, setFilter] = useState('All'); // 'All', 'Shop', 'Restaurant'
+  const [businesses, setBusinesses] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredData = DUMMY_BUSINESSES.filter(
-    (b) => filter === 'All' || b.type === filter
+  useEffect(() => {
+    const fetchBusinesses = async () => {
+      try {
+        setIsLoading(true);
+        
+        // 1. Fetch from backend API
+        let apiBusinesses: any[] = [];
+        try {
+          const res = await axios.get(`${API_URL}/api/businesses`);
+          apiBusinesses = res.data;
+        } catch (apiErr) {
+          console.log("API failed to fetch businesses, relying on dummy & local store:", apiErr);
+        }
+
+        // 2. Load locally registered offline merchants from AsyncStorage
+        let localMerchants: any[] = [];
+        try {
+          const stored = await AsyncStorage.getItem('@registered_merchants');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            localMerchants = parsed.map((m: any) => ({
+              id: m.id || 'local_' + Date.now(),
+              name: m.businessName || m.fullName || 'My Business',
+              type: (m.type && m.type.toLowerCase() === 'shop') ? 'Shop' : 'Restaurant',
+              image: (m.images && m.images.length > 0) ? m.images[0] : (m.type === 'shop' ? 'https://picsum.photos/seed/shop1/200/200' : 'https://picsum.photos/seed/rest1/200/200'),
+              rating: 5.0,
+              address: m.address || 'Local Offline Address'
+            }));
+          }
+        } catch (storageErr) {
+          console.error("AsyncStorage failed to load merchants:", storageErr);
+        }
+
+        // 3. Combine with static dummy data for visual consistency
+        const combined = [...localMerchants, ...apiBusinesses, ...DUMMY_BUSINESSES];
+        
+        // Remove duplicate entries
+        const unique: any[] = [];
+        const seen = new Set();
+        for (const item of combined) {
+          const key = (item.id || item.name || '').toString().toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(item);
+          }
+        }
+
+        setBusinesses(unique);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchBusinesses();
+  }, []);
+
+  const filteredData = businesses.filter(
+    (b) => filter === 'All' || b.type.toLowerCase() === filter.toLowerCase()
   );
 
   return (
@@ -92,32 +155,39 @@ export default function BusinessesScreen() {
       </View>
 
       {/* List */}
-      <FlatList
-        data={filteredData}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
-          <TouchableOpacity 
-            style={styles.card} 
-            activeOpacity={0.85}
-            onPress={() => router.push({ pathname: '/shop-detail', params: { name: item.name } })}
-          >
-            <Image source={{ uri: item.image }} style={styles.cardImage} />
-            <View style={styles.cardInfo}>
-              <View style={styles.nameRow}>
-                <Text style={styles.businessName} numberOfLines={1}>{item.name}</Text>
-                <View style={styles.ratingBadge}>
-                  <Text style={styles.ratingStar}>★</Text>
-                  <Text style={styles.ratingText}>{item.rating}</Text>
+      {isLoading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#FF4010" />
+          <Text style={styles.loadingText}>Loading Businesses...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredData}
+          keyExtractor={(item) => (item.id || item.name || '').toString()}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => (
+            <TouchableOpacity 
+              style={styles.card} 
+              activeOpacity={0.85}
+              onPress={() => router.push({ pathname: '/shop-detail', params: { name: item.name } })}
+            >
+              <Image source={{ uri: item.image }} style={styles.cardImage} />
+              <View style={styles.cardInfo}>
+                <View style={styles.nameRow}>
+                  <Text style={styles.businessName} numberOfLines={1}>{item.name}</Text>
+                  <View style={styles.ratingBadge}>
+                    <Text style={styles.ratingStar}>★</Text>
+                    <Text style={styles.ratingText}>{item.rating}</Text>
+                  </View>
                 </View>
+                <Text style={styles.businessType}>{item.type}</Text>
+                <Text style={styles.businessAddress} numberOfLines={1}>📍 {item.address}</Text>
               </View>
-              <Text style={styles.businessType}>{item.type}</Text>
-              <Text style={styles.businessAddress} numberOfLines={1}>📍 {item.address}</Text>
-            </View>
-          </TouchableOpacity>
-        )}
-      />
+            </TouchableOpacity>
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -244,5 +314,17 @@ const styles = StyleSheet.create({
   businessAddress: {
     fontSize: 13,
     color: '#666',
+  },
+  loadingWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 60,
+  },
+  loadingText: {
+    fontSize: 15,
+    color: '#666',
+    fontWeight: '600',
   },
 });

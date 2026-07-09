@@ -9,28 +9,27 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { AdminHeader } from '../components/AdminHeader';
 import { RestaurantAdminTheme as theme } from '../constants/theme';
 import { getMerchantSession } from '../auth/session';
 import { AdminRoutes } from '../constants/routes';
+import { API_URL } from '../../apiConfig';
 import * as ImagePicker from 'expo-image-picker';
 
 type MenuItem = { id: string; name: string; category: string; price: number; available: boolean; image?: string };
 
-const INITIAL_MENU: MenuItem[] = [
-  { id: '1', name: 'Chicken Biryani', category: 'Biryani', price: 450, available: true, image: 'https://picsum.photos/200/200?sig=11' },
-  { id: '2', name: 'Mutton Karahi', category: 'Karahi', price: 2200, available: true, image: 'https://picsum.photos/200/200?sig=12' },
-  { id: '3', name: 'Chicken Tikka', category: 'BBQ', price: 850, available: true, image: 'https://picsum.photos/200/200?sig=13' },
-  { id: '4', name: 'Naan', category: 'Bread', price: 80, available: false, image: 'https://picsum.photos/200/200?sig=14' },
-  { id: '5', name: 'Mango Lassi', category: 'Drinks', price: 250, available: true, image: 'https://picsum.photos/200/200?sig=15' },
-];
+const RESTAURANT_MENU_KEY = '@restaurant_menu';
 
 export default function RestaurantMenuScreen() {
   const router = useRouter();
   const merchant = getMerchantSession();
-  const [menu, setMenu] = useState(INITIAL_MENU);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -60,11 +59,52 @@ export default function RestaurantMenuScreen() {
     }
   };
 
+  // Load menu from API + AsyncStorage
   useEffect(() => {
     if (!merchant || merchant.type !== 'restaurant') {
       router.replace(AdminRoutes.login);
+      return;
     }
-  }, [merchant, router]);
+    const loadMenu = async () => {
+      setIsLoading(true);
+      try {
+        // Load from API
+        let apiItems: MenuItem[] = [];
+        try {
+          const res = await axios.get(`${API_URL}/api/products`);
+          apiItems = res.data
+            .filter((p: any) => p.merchantId === merchant.id || p.merchantId === String(merchant.id))
+            .map((p: any): MenuItem => ({
+              id: p.id || p._id,
+              name: p.name,
+              category: p.category || 'General',
+              price: p.discountedPrice || p.price || 0,
+              available: p.inStock !== false,
+              image: p.images?.[0] || p.image,
+            }));
+        } catch {
+          console.log('API offline, loading local menu');
+        }
+
+        // Load locally stored menu items
+        let localItems: MenuItem[] = [];
+        try {
+          const raw = await AsyncStorage.getItem(RESTAURANT_MENU_KEY + '_' + merchant.id);
+          if (raw) localItems = JSON.parse(raw);
+        } catch {}
+
+        // Merge (local first, deduplicate by id)
+        const merged = [...localItems];
+        for (const item of apiItems) {
+          if (!merged.find((x) => x.id === item.id)) merged.push(item);
+        }
+        setMenu(merged);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadMenu();
+  }, [merchant?.id]);
 
   if (!merchant) return null;
 
@@ -72,7 +112,7 @@ export default function RestaurantMenuScreen() {
     setMenu((prev) => prev.map((m) => (m.id === id ? { ...m, available: !m.available } : m)));
   };
 
-  const addMenuItem = () => {
+  const addMenuItem = async () => {
     if (!newName.trim() || !newPrice.trim() || !newCategory.trim()) {
       Alert.alert('Error', 'Name, category aur price enter karein');
       return;
@@ -82,22 +122,47 @@ export default function RestaurantMenuScreen() {
       Alert.alert('Error', 'Valid price enter karein');
       return;
     }
-    setMenu((prev) => [
-      {
-        id: String(Date.now()),
-        name: newName.trim(),
-        category: newCategory.trim(),
-        price,
-        available: true,
-        image: newImage || undefined,
-      },
-      ...prev,
-    ]);
+
+    const newItem: MenuItem = {
+      id: String(Date.now()),
+      name: newName.trim(),
+      category: newCategory.trim(),
+      price,
+      available: true,
+      image: newImage || undefined,
+    };
+
+    // Show immediately in UI
+    setMenu((prev) => [newItem, ...prev]);
     setNewName('');
     setNewPrice('');
     setNewCategory('');
     setNewImage(null);
-    Alert.alert('Success', 'Menu item add ho gaya');
+
+    // Try to save to backend API
+    try {
+      await axios.post(`${API_URL}/api/products`, {
+        name: newItem.name,
+        price: newItem.price,
+        image: newItem.image,
+        merchantId: merchant.id,
+        category: newItem.category,
+        description: `${newItem.category} item from ${merchant.businessName}`,
+      });
+      Alert.alert('Success', 'Menu item add ho gaya aur backend pe save ho gaya!');
+    } catch {
+      // Fallback: save to local AsyncStorage
+      try {
+        const key = RESTAURANT_MENU_KEY + '_' + merchant.id;
+        const raw = await AsyncStorage.getItem(key);
+        const existing: MenuItem[] = raw ? JSON.parse(raw) : [];
+        existing.unshift(newItem);
+        await AsyncStorage.setItem(key, JSON.stringify(existing));
+        Alert.alert('Success', 'Menu item add ho gaya (Offline mode - locally saved)');
+      } catch {
+        Alert.alert('Success', 'Menu item add ho gaya (screen pe)');
+      }
+    }
   };
 
   return (
@@ -153,29 +218,41 @@ export default function RestaurantMenuScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Menu ({menu.length} items)</Text>
-        {menu.map((item) => (
-          <View key={item.id} style={styles.menuCard}>
-            {item.image ? (
-              <Image source={{ uri: item.image }} style={styles.menuImage} />
-            ) : (
-              <View style={[styles.menuImage, styles.menuImagePlaceholder]}>
-                <Text style={{ fontSize: 18 }}>🍔</Text>
-              </View>
-            )}
-            <View style={styles.menuInfo}>
-              <Text style={styles.menuName}>{item.name}</Text>
-              <Text style={styles.menuMeta}>
-                {item.category} • ₨{item.price.toLocaleString()}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.toggleBtn, item.available ? styles.toggleOn : styles.toggleOff]}
-              onPress={() => toggleAvailable(item.id)}
-            >
-              <Text style={styles.toggleText}>{item.available ? 'Available' : 'Sold Out'}</Text>
-            </TouchableOpacity>
+        {isLoading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={theme.primary} />
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Menu load ho raha hai...</Text>
           </View>
-        ))}
+        ) : menu.length === 0 ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Text style={{ fontSize: 32 }}>🍔</Text>
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Menu khali hai. Upar se item add karein!</Text>
+          </View>
+        ) : (
+          menu.map((item) => (
+            <View key={item.id} style={styles.menuCard}>
+              {item.image ? (
+                <Image source={{ uri: item.image }} style={styles.menuImage} />
+              ) : (
+                <View style={[styles.menuImage, styles.menuImagePlaceholder]}>
+                  <Text style={{ fontSize: 18 }}>🍔</Text>
+                </View>
+              )}
+              <View style={styles.menuInfo}>
+                <Text style={styles.menuName}>{item.name}</Text>
+                <Text style={styles.menuMeta}>
+                  {item.category} • ₨{item.price.toLocaleString()}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleBtn, item.available ? styles.toggleOn : styles.toggleOff]}
+                onPress={() => toggleAvailable(item.id)}
+              >
+                <Text style={styles.toggleText}>{item.available ? 'Available' : 'Sold Out'}</Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );

@@ -14,8 +14,10 @@ import {
   Alert,
   Linking,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { getMerchantSession } from '../adminPanel/auth/session';
 import { API_URL } from '../apiConfig';
@@ -84,113 +86,6 @@ const SUPER_DEALS = [
 ];
 
 const FEED_TABS = ['Choice', 'Recommended', 'Coins', 'Top Sellers'];
-
-const PRODUCTS = [
-  {
-    id: '1',
-    name: 'Premium Mechanical Keyboard RGB Backlit Gaming',
-    image: 'https://picsum.photos/seed/prod1/300/300',
-    price: 2499,
-    originalPrice: 7999,
-    rating: 4.8,
-    reviews: 3241,
-    sold: '50k+',
-    badge: 'Choice',
-    shipping: 'Free shipping',
-    discount: 69,
-  },
-  {
-    id: '2',
-    name: 'Minimalist Leather Wallet RFID Blocking Slim',
-    image: 'https://picsum.photos/seed/prod2/300/300',
-    price: 849,
-    originalPrice: 2299,
-    rating: 4.6,
-    reviews: 1872,
-    sold: '20k+',
-    badge: null,
-    shipping: 'Free shipping',
-    discount: 63,
-  },
-  {
-    id: '3',
-    name: 'Stainless Steel Water Bottle Insulated 1L',
-    image: 'https://picsum.photos/seed/prod3/300/300',
-    price: 1199,
-    originalPrice: 3500,
-    rating: 4.7,
-    reviews: 6541,
-    sold: '100k+',
-    badge: 'Choice',
-    shipping: 'Free shipping',
-    discount: 66,
-  },
-  {
-    id: '4',
-    name: 'USB-C Hub 7-in-1 Multi-port Adapter for Laptop',
-    image: 'https://picsum.photos/seed/prod4/300/300',
-    price: 1649,
-    originalPrice: 4499,
-    rating: 4.5,
-    reviews: 2109,
-    sold: '30k+',
-    badge: null,
-    shipping: 'Free shipping',
-    discount: 63,
-  },
-  {
-    id: '5',
-    name: 'Yoga Mat Non-Slip Thick Exercise Fitness',
-    image: 'https://picsum.photos/seed/prod5/300/300',
-    price: 1399,
-    originalPrice: 3999,
-    rating: 4.9,
-    reviews: 8820,
-    sold: '200k+',
-    badge: 'Choice',
-    shipping: 'Free shipping',
-    discount: 65,
-  },
-  {
-    id: '6',
-    name: 'Wireless Charging Pad 15W Fast Charge',
-    image: 'https://picsum.photos/seed/prod6/300/300',
-    price: 799,
-    originalPrice: 1999,
-    rating: 4.4,
-    reviews: 953,
-    sold: '10k+',
-    badge: null,
-    shipping: '+₨150 shipping',
-    discount: 60,
-  },
-  {
-    id: '7',
-    name: 'Portable Bluetooth Speaker Waterproof IPX7',
-    image: 'https://picsum.photos/seed/prod7/300/300',
-    price: 1999,
-    originalPrice: 5999,
-    rating: 4.7,
-    reviews: 4412,
-    sold: '80k+',
-    badge: 'Choice',
-    shipping: 'Free shipping',
-    discount: 67,
-  },
-  {
-    id: '8',
-    name: 'Resistance Bands Set Workout Exercise Home Gym',
-    image: 'https://picsum.photos/seed/prod8/300/300',
-    price: 599,
-    originalPrice: 1499,
-    rating: 4.6,
-    reviews: 7123,
-    sold: '150k+',
-    badge: null,
-    shipping: 'Free shipping',
-    discount: 60,
-  },
-];
 
 // ── COUNTDOWN TIMER HOOK ─────────────────────────────────────────────────────
 
@@ -340,6 +235,74 @@ export default function HomeScreen() {
     }
   };
 
+  const [products, setProducts] = useState<any[]>([]);
+  const [isProductsLoading, setIsProductsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadDynamicProducts = async () => {
+      try {
+        setIsProductsLoading(true);
+        
+        // 1. Fetch from backend API
+        let apiProducts: any[] = [];
+        try {
+          const res = await axios.get(`${API_URL}/api/products`);
+          apiProducts = res.data;
+        } catch (apiErr) {
+          console.log("Failed to fetch products from API, loading local backup:", apiErr);
+        }
+
+        // 2. Fetch locally added products from AsyncStorage (offline adds)
+        let offlineProducts: any[] = [];
+        try {
+          const stored = await AsyncStorage.getItem('@merchant_products');
+          if (stored) {
+            offlineProducts = JSON.parse(stored);
+          }
+        } catch (storageErr) {
+          console.error("Failed to load local offline products:", storageErr);
+        }
+
+        // 3. Merge them (making sure offline products take priority)
+        const combined = [...offlineProducts, ...apiProducts];
+        
+        // Map database schema to UI schema
+        const mapped = combined.map((p: any) => ({
+          id: p.id || p._id,
+          name: p.name,
+          image: (p.images && p.images.length > 0) ? p.images[0] : (p.image || 'https://picsum.photos/seed/prod1/300/300'),
+          price: p.discountedPrice || p.price || 0,
+          originalPrice: p.originalPrice || p.price || 0,
+          rating: p.rating || 5.0,
+          reviews: p.reviewCount || p.reviews || 0,
+          sold: p.sold || '100+',
+          badge: p.badge || null,
+          shipping: p.shipping || (p.delivery && p.delivery.charge === 'Free' ? 'Free shipping' : 'Standard shipping'),
+          discount: p.discountPercent || p.discount || 0
+        }));
+
+        // Remove duplicates
+        const unique: any[] = [];
+        const seen = new Set();
+        for (const item of mapped) {
+          const key = (item.id || item.name || '').toString().toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(item);
+          }
+        }
+
+        setProducts(unique);
+      } catch (err) {
+        console.error("Error loading home products:", err);
+      } finally {
+        setIsProductsLoading(false);
+      }
+    };
+
+    loadDynamicProducts();
+  }, []);
+
   // ── ANIMATED SIDEBAR DRAWER STATES ──
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const drawerAnim = useRef(new Animated.Value(-280)).current;
@@ -362,7 +325,7 @@ export default function HomeScreen() {
     }).start(() => setIsDrawerOpen(false));
   };
 
-  const renderProduct = ({ item }: { item: typeof PRODUCTS[0] }) => (
+  const renderProduct = ({ item }: { item: any }) => (
     <TouchableOpacity key={item.id} style={styles.productCard} activeOpacity={0.85}
       onPress={() => router.push({ pathname: '/product-detail', params: { productId: item.id } })}
     >
@@ -612,7 +575,17 @@ export default function HomeScreen() {
 
         {/* ── PRODUCT GRID ── */}
         <View style={styles.productGrid}>
-          {PRODUCTS.map((item) => renderProduct({ item }))}
+          {isProductsLoading ? (
+            <View style={{ flex: 1, paddingVertical: 40, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+              <ActivityIndicator size="small" color="#FF4010" />
+            </View>
+          ) : products.length === 0 ? (
+            <View style={{ flex: 1, paddingVertical: 40, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+              <Text style={{ color: '#999', fontSize: 14 }}>No products available.</Text>
+            </View>
+          ) : (
+            products.map((item) => renderProduct({ item }))
+          )}
         </View>
 
         {/* Bottom spacer for tab bar */}

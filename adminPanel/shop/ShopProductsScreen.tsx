@@ -9,27 +9,27 @@ import {
   TouchableOpacity,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { AdminHeader } from '../components/AdminHeader';
 import { ShopAdminTheme as theme } from '../constants/theme';
 import { getMerchantSession } from '../auth/session';
 import { AdminRoutes } from '../constants/routes';
+import { API_URL } from '../../apiConfig';
 import * as ImagePicker from 'expo-image-picker';
 
 type Product = { id: string; name: string; price: number; stock: number; active: boolean; image?: string };
 
-const INITIAL_PRODUCTS: Product[] = [
-  { id: '1', name: 'Mechanical Keyboard RGB', price: 2499, stock: 15, active: true, image: 'https://picsum.photos/200/200?sig=1' },
-  { id: '2', name: 'Leather Wallet Slim', price: 849, stock: 28, active: true, image: 'https://picsum.photos/200/200?sig=2' },
-  { id: '3', name: 'USB-C Hub 7-in-1', price: 1649, stock: 0, active: false, image: 'https://picsum.photos/200/200?sig=3' },
-  { id: '4', name: 'Bluetooth Speaker', price: 1999, stock: 9, active: true, image: 'https://picsum.photos/200/200?sig=4' },
-];
+const SHOP_PRODUCTS_KEY = '@shop_products';
 
 export default function ShopProductsScreen() {
   const router = useRouter();
   const merchant = getMerchantSession();
-  const [products, setProducts] = useState(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
   const [newImage, setNewImage] = useState<string | null>(null);
@@ -58,11 +58,53 @@ export default function ShopProductsScreen() {
     }
   };
 
+  // Load products from API + AsyncStorage
   useEffect(() => {
     if (!merchant || merchant.type !== 'shop') {
       router.replace(AdminRoutes.login);
+      return;
     }
-  }, [merchant, router]);
+    const loadProducts = async () => {
+      setIsLoading(true);
+      try {
+        // Load from API
+        let apiProds: Product[] = [];
+        try {
+          const res = await axios.get(`${API_URL}/api/products`);
+          // Filter to only this merchant's products
+          apiProds = res.data
+            .filter((p: any) => p.merchantId === merchant.id || p.merchantId === String(merchant.id))
+            .map((p: any): Product => ({
+              id: p.id || p._id,
+              name: p.name,
+              price: p.discountedPrice || p.price || 0,
+              stock: p.stock || 10,
+              active: p.inStock !== false,
+              image: p.images?.[0] || p.image,
+            }));
+        } catch {
+          console.log('API offline, loading local products');
+        }
+
+        // Load from AsyncStorage (offline adds)
+        let localProds: Product[] = [];
+        try {
+          const raw = await AsyncStorage.getItem(SHOP_PRODUCTS_KEY + '_' + merchant.id);
+          if (raw) localProds = JSON.parse(raw);
+        } catch {}
+
+        // Merge (local first, deduplicate by id)
+        const merged = [...localProds];
+        for (const p of apiProds) {
+          if (!merged.find((x) => x.id === p.id)) merged.push(p);
+        }
+        setProducts(merged);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadProducts();
+  }, [merchant?.id]);
 
   if (!merchant) return null;
 
@@ -70,7 +112,7 @@ export default function ShopProductsScreen() {
     setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, active: !p.active } : p)));
   };
 
-  const addProduct = () => {
+  const addProduct = async () => {
     if (!newName.trim() || !newPrice.trim()) {
       Alert.alert('Error', 'Product name aur price enter karein');
       return;
@@ -80,21 +122,45 @@ export default function ShopProductsScreen() {
       Alert.alert('Error', 'Valid price enter karein');
       return;
     }
-    setProducts((prev) => [
-      { 
-        id: String(Date.now()), 
-        name: newName.trim(), 
-        price, 
-        stock: 10, 
-        active: true,
-        image: newImage || undefined
-      },
-      ...prev,
-    ]);
+
+    const newProd: Product = {
+      id: String(Date.now()),
+      name: newName.trim(),
+      price,
+      stock: 50,
+      active: true,
+      image: newImage || undefined,
+    };
+
+    // Show immediately in UI
+    setProducts((prev) => [newProd, ...prev]);
     setNewName('');
     setNewPrice('');
     setNewImage(null);
-    Alert.alert('Success', 'Product add ho gaya');
+
+    // Try to save to backend API
+    try {
+      await axios.post(`${API_URL}/api/products`, {
+        name: newProd.name,
+        price: newProd.price,
+        image: newProd.image,
+        merchantId: merchant.id,
+        category: 'Shop',
+      });
+      Alert.alert('Success', 'Product add ho gaya aur backend pe save ho gaya!');
+    } catch {
+      // Fallback: save to local AsyncStorage
+      try {
+        const key = SHOP_PRODUCTS_KEY + '_' + merchant.id;
+        const raw = await AsyncStorage.getItem(key);
+        const existing: Product[] = raw ? JSON.parse(raw) : [];
+        existing.unshift(newProd);
+        await AsyncStorage.setItem(key, JSON.stringify(existing));
+        Alert.alert('Success', 'Product add ho gaya (Offline mode - locally saved)');
+      } catch {
+        Alert.alert('Success', 'Product add ho gaya (screen pe)');
+      }
+    }
   };
 
   return (
@@ -143,29 +209,41 @@ export default function ShopProductsScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Your Products ({products.length})</Text>
-        {products.map((product) => (
-          <View key={product.id} style={styles.productCard}>
-            {product.image ? (
-              <Image source={{ uri: product.image }} style={styles.productImage} />
-            ) : (
-              <View style={[styles.productImage, styles.productImagePlaceholder]}>
-                <Text style={{ fontSize: 18 }}>🛍️</Text>
-              </View>
-            )}
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>{product.name}</Text>
-              <Text style={styles.productMeta}>
-                ₨{product.price.toLocaleString()} • Stock: {product.stock}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.toggleBtn, product.active ? styles.toggleOn : styles.toggleOff]}
-              onPress={() => toggleActive(product.id)}
-            >
-              <Text style={styles.toggleText}>{product.active ? 'Active' : 'Hidden'}</Text>
-            </TouchableOpacity>
+        {isLoading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="small" color={theme.primary} />
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Products load ho rahe hain...</Text>
           </View>
-        ))}
+        ) : products.length === 0 ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Text style={{ fontSize: 32 }}>🛍️</Text>
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Koi product nahi. Upar se add karein!</Text>
+          </View>
+        ) : (
+          products.map((product) => (
+            <View key={product.id} style={styles.productCard}>
+              {product.image ? (
+                <Image source={{ uri: product.image }} style={styles.productImage} />
+              ) : (
+                <View style={[styles.productImage, styles.productImagePlaceholder]}>
+                  <Text style={{ fontSize: 18 }}>🛍️</Text>
+                </View>
+              )}
+              <View style={styles.productInfo}>
+                <Text style={styles.productName}>{product.name}</Text>
+                <Text style={styles.productMeta}>
+                  ₨{product.price.toLocaleString()} • Stock: {product.stock}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.toggleBtn, product.active ? styles.toggleOn : styles.toggleOff]}
+                onPress={() => toggleActive(product.id)}
+              >
+                <Text style={styles.toggleText}>{product.active ? 'Active' : 'Hidden'}</Text>
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );
