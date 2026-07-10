@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, StatusBar, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, StatusBar, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { AdminHeader } from '../components/AdminHeader';
 import { ShopAdminTheme as theme } from '../constants/theme';
 import { getMerchantSession } from '../auth/session';
 import { AdminRoutes } from '../constants/routes';
+import { API_URL } from '../../apiConfig';
 
 const ORDERS = [
   { id: 'SH-1042', customer: 'Ali Raza', items: 'Keyboard x1', total: 2499, status: 'Pending' },
@@ -24,13 +27,72 @@ export default function ShopOrdersScreen() {
   const router = useRouter();
   const merchant = getMerchantSession();
   const [filter, setFilter] = useState('All');
-  const [orders, setOrders] = useState(ORDERS);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!merchant || merchant.type !== 'shop') {
       router.replace(AdminRoutes.login);
+      return;
     }
-  }, [merchant, router]);
+    const loadMerchantOrders = async () => {
+      setIsLoading(true);
+      try {
+        // 1. Fetch from API
+        let apiOrders: any[] = [];
+        try {
+          const res = await axios.get(`${API_URL}/api/orders/merchant/${merchant.id}`);
+          apiOrders = res.data;
+        } catch (apiErr) {
+          console.log("Failed to fetch merchant orders from API:", apiErr);
+        }
+
+        // 2. Fetch from AsyncStorage (@all_orders)
+        let localOrders: any[] = [];
+        try {
+          const raw = await AsyncStorage.getItem('@all_orders');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            localOrders = parsed.filter((o: any) => o.merchantId === merchant.id || o.merchantId === 'bus_' + merchant.id || o.shopName === merchant.businessName);
+          }
+        } catch (storageErr) {
+          console.error("Failed to load local offline orders:", storageErr);
+        }
+
+        // 3. Merge and sort
+        const combined = [...localOrders, ...apiOrders];
+        
+        if (combined.length === 0 && merchant.email === 'shop@haiderpay.com') {
+          setOrders(ORDERS);
+        } else {
+          const unique: any[] = [];
+          const seen = new Set();
+          for (const o of combined) {
+            const key = o.orderId || o.id;
+            if (!seen.has(key)) {
+              seen.add(key);
+              unique.push(o);
+            }
+          }
+          setOrders(unique);
+          
+          const newOrders = unique.filter(o => o.status === 'New' || o.status === 'Pending');
+          if (newOrders.length > 0) {
+            Alert.alert(
+              'New Order Alert 📦',
+              `Aapke paas ${newOrders.length} naya order(s) aaye hain! Products packing shuru karein.`
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Failed to process orders:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadMerchantOrders();
+  }, [merchant?.id]);
 
   if (!merchant) return null;
 
@@ -58,34 +120,46 @@ export default function ShopOrdersScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        {filtered.map((order) => (
-          <View key={order.id} style={styles.card}>
-            <View style={styles.cardTop}>
-              <Text style={styles.orderId}>{order.id}</Text>
-              <View style={[styles.badge, { backgroundColor: STATUS_COLORS[order.status] + '22' }]}>
-                <Text style={[styles.badgeText, { color: STATUS_COLORS[order.status] }]}>{order.status}</Text>
-              </View>
-            </View>
-            <Text style={styles.customer}>{order.customer}</Text>
-            <Text style={styles.items}>{order.items}</Text>
-            <Text style={styles.total}>₨{order.total.toLocaleString()}</Text>
-
-            {order.status === 'Pending' && (
-              <View style={styles.actions}>
-                <TouchableOpacity style={styles.shipBtn} onPress={() => updateStatus(order.id, 'Shipped')}>
-                  <Text style={styles.shipBtnText}>Mark Shipped</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {order.status === 'Shipped' && (
-              <View style={styles.actions}>
-                <TouchableOpacity style={styles.deliverBtn} onPress={() => updateStatus(order.id, 'Delivered')}>
-                  <Text style={styles.deliverBtnText}>Mark Delivered</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+        {isLoading ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={theme.primary} />
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Orders loading...</Text>
           </View>
-        ))}
+        ) : filtered.length === 0 ? (
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Text style={{ fontSize: 32 }}>📦</Text>
+            <Text style={{ color: theme.muted, marginTop: 8, fontSize: 13 }}>Abhi tak koi orders nahi hain.</Text>
+          </View>
+        ) : (
+          filtered.map((order) => (
+            <View key={order.id} style={styles.card}>
+              <View style={styles.cardTop}>
+                <Text style={styles.orderId}>{order.id}</Text>
+                <View style={[styles.badge, { backgroundColor: STATUS_COLORS[order.status] + '22' }]}>
+                  <Text style={[styles.badgeText, { color: STATUS_COLORS[order.status] }]}>{order.status}</Text>
+                </View>
+              </View>
+              <Text style={styles.customer}>{order.customer}</Text>
+              <Text style={styles.items}>{order.items}</Text>
+              <Text style={styles.total}>₨{order.total.toLocaleString()}</Text>
+
+              {order.status === 'Pending' && (
+                <View style={styles.actions}>
+                  <TouchableOpacity style={styles.shipBtn} onPress={() => updateStatus(order.id, 'Shipped')}>
+                    <Text style={styles.shipBtnText}>Mark Shipped</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {order.status === 'Shipped' && (
+                <View style={styles.actions}>
+                  <TouchableOpacity style={styles.deliverBtn} onPress={() => updateStatus(order.id, 'Delivered')}>
+                    <Text style={styles.deliverBtnText}>Mark Delivered</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );

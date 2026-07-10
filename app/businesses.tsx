@@ -170,7 +170,7 @@ export default function BusinessesScreen() {
             <TouchableOpacity 
               style={styles.card} 
               activeOpacity={0.85}
-              onPress={() => router.push({ pathname: '/shop-detail', params: { name: item.name } })}
+              onPress={() => router.push({ pathname: '/shop-detail', params: { name: item.name, merchantId: item.id } })}
             >
               <Image source={{ uri: item.image }} style={styles.cardImage} />
               <View style={styles.cardInfo}>

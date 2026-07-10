@@ -1,9 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, StatusBar } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 export default function ShopSuccessScreen() {
   const router = useRouter();
+  const { orderId, shopName } = useLocalSearchParams<{ orderId?: string; shopName?: string }>();
+
+  const currentOrderId = orderId || 'RT-' + Math.floor(Math.random() * 9000 + 1000);
+  const currentShopName = shopName || 'Heaven Slice';
 
   return (
     <>
@@ -15,15 +19,15 @@ export default function ShopSuccessScreen() {
           </View>
 
           <Text style={styles.title}>Order Placed Successfully!</Text>
-          <Text style={styles.subtitle}>Your order has been placed.</Text>
+          <Text style={styles.subtitle}>Your order from {currentShopName} has been placed.</Text>
 
-          <Text style={styles.boldText}>Order ID: #HS12345</Text>
+          <Text style={styles.boldText}>Order ID: #{currentOrderId}</Text>
           <Text style={styles.boldText}>Estimated Delivery: 35-45 min</Text>
 
           <TouchableOpacity
             style={styles.trackBtn}
             activeOpacity={0.8}
-            onPress={() => router.push('/shop-tracking')}
+            onPress={() => router.push({ pathname: '/shop-tracking', params: { orderId: currentOrderId, shopName: currentShopName } })}
           >
             <Text style={styles.trackBtnText}>Track Order</Text>
           </TouchableOpacity>

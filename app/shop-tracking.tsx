@@ -1,9 +1,16 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, StatusBar, Image } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 export default function ShopTrackingScreen() {
   const router = useRouter();
+  const { orderId, shopName } = useLocalSearchParams<{ orderId?: string; shopName?: string }>();
+
+  const currentOrderId = orderId || 'RT-' + Math.floor(Math.random() * 9000 + 1000);
+  const currentShopName = shopName || 'Heaven Slice';
+
+  // Get initials for placeholder logo
+  const logoInitials = currentShopName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -24,12 +31,12 @@ export default function ShopTrackingScreen() {
           {/* Top Info */}
           <View style={styles.cardTopRow}>
             <View style={styles.logoContainer}>
-              <Text style={styles.logoText}>HEAVEN{'\n'}SLICE</Text>
+              <Text style={styles.logoText}>{logoInitials || 'HS'}</Text>
             </View>
             <View style={styles.orderInfo}>
-              <Text style={styles.orderId}>Order #HS12345</Text>
-              <Text style={styles.shopName}>Heaven Slice</Text>
-              <Text style={styles.orderMeta}>3 Items • PKR 2,750</Text>
+              <Text style={styles.orderId}>Order #{currentOrderId}</Text>
+              <Text style={styles.shopName}>{currentShopName}</Text>
+              <Text style={styles.orderMeta}>Order Status: Confirmed</Text>
             </View>
             <TouchableOpacity>
               <Text style={styles.helpText}>Help</Text>

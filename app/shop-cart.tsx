@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, StatusBar, ActivityIndicator } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Hardcoded initial cart items based on mockup
+// Hardcoded initial cart items based on mockup (fallback only)
 const INITIAL_CART = [
   { id: '1', name: 'Chicken Fajita Pizza', price: 950, image: 'https://picsum.photos/seed/pizza1/100/100', qty: 1 },
   { id: '2', name: 'Cheese Lover Pizza', price: 850, image: 'https://picsum.photos/seed/pizza2/100/100', qty: 1 },
@@ -11,18 +12,68 @@ const INITIAL_CART = [
 
 export default function ShopCartScreen() {
   const router = useRouter();
-  const [cartItems, setCartItems] = useState(INITIAL_CART);
+  const { shopName } = useLocalSearchParams<{ shopName?: string }>();
+  
+  const [currentShopName, setCurrentShopName] = useState(shopName || 'Heaven Slice');
+  const [cartItems, setCartItems] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const loadCart = async () => {
+      try {
+        setIsLoading(true);
+        const raw = await AsyncStorage.getItem('@cart_data');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.items && parsed.items.length > 0) {
+            setCartItems(parsed.items);
+          } else {
+            setCartItems(INITIAL_CART);
+          }
+          if (parsed.shopName) {
+            setCurrentShopName(parsed.shopName);
+          }
+        } else {
+          setCartItems(INITIAL_CART);
+        }
+      } catch (err) {
+        console.error("Failed to load cart:", err);
+        setCartItems(INITIAL_CART);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadCart();
+  }, []);
+
+  const updateCartStorage = async (updatedItems: any[]) => {
+    try {
+      const raw = await AsyncStorage.getItem('@cart_data');
+      const parsed = raw ? JSON.parse(raw) : { shopName: currentShopName, merchantId: '' };
+      parsed.items = updatedItems;
+      await AsyncStorage.setItem('@cart_data', JSON.stringify(parsed));
+    } catch (err) {
+      console.error("Failed to save updated cart to storage:", err);
+    }
+  };
 
   const increment = (id: string) => {
-    setCartItems(prev => prev.map(item => item.id === id ? { ...item, qty: item.qty + 1 } : item));
+    const updated = cartItems.map(item => item.id === id ? { ...item, qty: item.qty + 1 } : item);
+    setCartItems(updated);
+    updateCartStorage(updated);
   };
 
   const decrement = (id: string) => {
-    setCartItems(prev => prev.map(item => item.id === id && item.qty > 1 ? { ...item, qty: item.qty - 1 } : item));
+    const updated = cartItems.map(item => item.id === id && item.qty > 1 ? { ...item, qty: item.qty - 1 } : item);
+    setCartItems(updated);
+    updateCartStorage(updated);
   };
 
   const deleteItem = (id: string) => {
-    setCartItems(prev => prev.filter(item => item.id !== id));
+    const updated = cartItems.filter(item => item.id !== id);
+    setCartItems(updated);
+    updateCartStorage(updated);
   };
 
   const totalItems = cartItems.reduce((acc, item) => acc + item.qty, 0);
@@ -40,7 +91,7 @@ export default function ShopCartScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
             <Text style={styles.iconText}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Cart</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>Cart - {currentShopName}</Text>
         </View>
         <Text style={styles.headerItemsCount}>{totalItems} Items</Text>
       </View>
@@ -88,7 +139,7 @@ export default function ShopCartScreen() {
             <Text style={styles.totalValue}>PKR {total.toLocaleString()}</Text>
           </View>
 
-          <TouchableOpacity style={styles.checkoutBtn} activeOpacity={0.85} onPress={() => router.push('/shop-checkout')}>
+          <TouchableOpacity style={styles.checkoutBtn} activeOpacity={0.85} onPress={() => router.push({ pathname: '/shop-checkout', params: { shopName: currentShopName } })}>
             <Text style={styles.checkoutBtnText}>Proceed to Checkout</Text>
           </TouchableOpacity>
         </View>

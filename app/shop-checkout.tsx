@@ -1,11 +1,109 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, TextInput, ActivityIndicator } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { API_URL } from '../apiConfig';
 
 export default function ShopCheckoutScreen() {
   const router = useRouter();
+  const { shopName } = useLocalSearchParams<{ shopName?: string }>();
+
+  const [currentShopName, setCurrentShopName] = useState(shopName || 'Heaven Slice');
+  const [merchantId, setMerchantId] = useState('');
+  const [cartItems, setCartItems] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [paymentMethod, setPaymentMethod] = useState('cod'); // 'cod' or 'jazzcash'
   const [jazzcashNumber, setJazzcashNumber] = useState('');
+
+  useEffect(() => {
+    const loadCart = async () => {
+      try {
+        setIsLoading(true);
+        const raw = await AsyncStorage.getItem('@cart_data');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.items && parsed.items.length > 0) {
+            setCartItems(parsed.items);
+          }
+          if (parsed.shopName) {
+            setCurrentShopName(parsed.shopName);
+          }
+          if (parsed.merchantId) {
+            setMerchantId(parsed.merchantId);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load cart for checkout:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadCart();
+  }, []);
+
+  const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.qty), 0);
+  const deliveryCharges = 0;
+  const total = subtotal + deliveryCharges;
+
+  const handlePlaceOrder = async () => {
+    const orderId = 'RT-' + Math.floor(Math.random() * 9000 + 1000);
+    const itemsSummary = cartItems.map(i => `${i.name} x${i.qty}`).join(', ');
+
+    const newOrderObj = {
+      id: 'ord_' + Date.now(),
+      orderId,
+      customer: 'Guest Customer',
+      items: itemsSummary || 'No items',
+      total,
+      status: 'New',
+      merchantId: merchantId || '',
+      shopName: currentShopName,
+      createdAt: new Date().toISOString()
+    };
+
+    // 1. Post order to backend
+    try {
+      await axios.post(`${API_URL}/api/orders`, {
+        items: cartItems.map(i => ({ id: i.id, name: i.name, price: i.price, quantity: i.qty })),
+        subtotal,
+        total,
+        paymentMethod,
+        address: {
+          type: 'Home',
+          details: 'House # 123, Street 5, Block A, Lahore'
+        },
+        merchantId: merchantId || '',
+        shopName: currentShopName
+      });
+    } catch (apiErr) {
+      console.log("Failed to post order to backend:", apiErr);
+    }
+
+    // 2. Save order locally in AsyncStorage for offline merchant notification
+    try {
+      const raw = await AsyncStorage.getItem('@all_orders');
+      const existing = raw ? JSON.parse(raw) : [];
+      existing.unshift(newOrderObj);
+      await AsyncStorage.setItem('@all_orders', JSON.stringify(existing));
+    } catch (storageErr) {
+      console.error("Failed to save order locally:", storageErr);
+    }
+
+    // 3. Clear cart
+    await AsyncStorage.removeItem('@cart_data');
+
+    // 4. Go to success
+    router.push({
+      pathname: '/shop-success',
+      params: {
+        orderId,
+        shopName: currentShopName
+      }
+    });
+  };
 
   return (
     <View style={styles.container}>
@@ -16,7 +114,7 @@ export default function ShopCheckoutScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
           <Text style={styles.iconText}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Confirm Order</Text>
+        <Text style={styles.headerTitle} numberOfLines={1}>Confirm - {currentShopName}</Text>
         <View style={{ width: 40 }} /> {/* Spacer */}
       </View>
 
@@ -42,36 +140,32 @@ export default function ShopCheckoutScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Order Summary</Text>
           
-          <View style={styles.orderItem}>
-            <Text style={styles.orderItemName}>Chicken Fajita Pizza</Text>
-            <Text style={styles.orderItemQty}>x 1</Text>
-            <Text style={styles.orderItemPrice}>PKR 950</Text>
-          </View>
-          <View style={styles.orderItem}>
-            <Text style={styles.orderItemName}>Cheese Lover Pizza</Text>
-            <Text style={styles.orderItemQty}>x 1</Text>
-            <Text style={styles.orderItemPrice}>PKR 850</Text>
-          </View>
-          <View style={styles.orderItem}>
-            <Text style={styles.orderItemName}>BBQ Chicken Pizza</Text>
-            <Text style={styles.orderItemQty}>x 1</Text>
-            <Text style={styles.orderItemPrice}>PKR 950</Text>
-          </View>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#D32F2F" />
+          ) : (
+            cartItems.map((item) => (
+              <View key={item.id} style={styles.orderItem}>
+                <Text style={styles.orderItemName}>{item.name}</Text>
+                <Text style={styles.orderItemQty}>x {item.qty}</Text>
+                <Text style={styles.orderItemPrice}>PKR {(item.price * item.qty).toLocaleString()}</Text>
+              </View>
+            ))
+          )}
 
           <View style={styles.subtotalContainer}>
             <View style={styles.billRow}>
               <Text style={styles.billLabel}>Subtotal</Text>
-              <Text style={styles.billValue}>PKR 2,750</Text>
+              <Text style={styles.billValue}>PKR {subtotal.toLocaleString()}</Text>
             </View>
             <View style={styles.billRow}>
               <Text style={styles.billLabel}>Delivery Charges</Text>
-              <Text style={styles.billValue}>PKR 0</Text>
+              <Text style={styles.billValue}>PKR {deliveryCharges}</Text>
             </View>
           </View>
 
           <View style={styles.totalContainer}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>PKR 2,750</Text>
+            <Text style={styles.totalValue}>PKR {total.toLocaleString()}</Text>
           </View>
         </View>
 
@@ -117,7 +211,7 @@ export default function ShopCheckoutScreen() {
 
         {/* Place Order Button */}
         <View style={styles.btnContainer}>
-          <TouchableOpacity style={styles.placeOrderBtn} activeOpacity={0.8} onPress={() => router.push('/shop-success')}>
+          <TouchableOpacity style={styles.placeOrderBtn} activeOpacity={0.8} onPress={handlePlaceOrder}>
             <Text style={styles.placeOrderBtnText}>Place Order</Text>
           </TouchableOpacity>
         </View>
